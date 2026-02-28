@@ -1,11 +1,34 @@
 const http = require('http');
-const https = require('https');
+const httpProxy = require('http-proxy');
 
-const FIREBASE_HOST = 'dpgames-66d73-default-rtdb.europe-west1.firebasedatabase.app';
+const FIREBASE_TARGET = 'https://dpgames-66d73-default-rtdb.europe-west1.firebasedatabase.app';
 const PORT = process.env.PORT || 3000;
 
+const proxy = httpProxy.createProxyServer({
+  target: FIREBASE_TARGET,
+  changeOrigin: true,
+  secure: true,
+  ws: true,
+  headers: {
+    'Host': 'dpgames-66d73-default-rtdb.europe-west1.firebasedatabase.app'
+  }
+});
+
+proxy.on('error', (err, req, res) => {
+  console.error('Proxy error:', err.message);
+  if (res.writeHead) {
+    res.writeHead(502);
+    res.end('Proxy error');
+  }
+});
+
+proxy.on('proxyRes', (proxyRes, req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+});
+
 const server = http.createServer((req, res) => {
-  
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -16,42 +39,15 @@ const server = http.createServer((req, res) => {
     return;
   }
   
-  let body = [];
-  req.on('data', chunk => body.push(chunk));
-  req.on('end', () => {
-    body = Buffer.concat(body);
-    
-    const options = {
-      hostname: FIREBASE_HOST,
-      port: 443,
-      path: req.url,
-      method: req.method,
-      headers: {
-        'Host': FIREBASE_HOST,
-        'Content-Type': 'application/json',
-      }
-    };
-    
-    if (body.length > 0) {
-      options.headers['Content-Length'] = body.length;
-    }
-    
-    const proxyReq = https.request(options, (proxyRes) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.writeHead(proxyRes.statusCode);
-      proxyRes.pipe(res);
-    });
-    
-    proxyReq.on('error', (e) => {
-      res.writeHead(500);
-      res.end('Error: ' + e.message);
-    });
-    
-    if (body.length > 0) proxyReq.write(body);
-    proxyReq.end();
-  });
+  proxy.web(req, res);
+});
+
+// WebSocket проксирование
+server.on('upgrade', (req, socket, head) => {
+  proxy.ws(req, socket, head);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('Firebase Proxy running on port ' + PORT);
+  console.log('Firebase WS+HTTP Proxy on port ' + PORT);
+  console.log('Target:', FIREBASE_TARGET);
 });
